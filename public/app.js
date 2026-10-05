@@ -9,6 +9,13 @@ function el(tag, className, text) { const n = document.createElement(tag); if (c
 function button(text, action, className = 'secondary') { const b = el('button', className, text); b.type = 'button'; b.addEventListener('click', () => guard(action)); return b; }
 function toast(message, error = false) { $('#toast').textContent = message; $('#toast').classList.toggle('error', error); $('#toast').hidden = false; clearTimeout(toast.timer); toast.timer = setTimeout(() => $('#toast').hidden = true, 6500); }
 async function guard(fn) { try { await fn(); } catch (e) { toast(e.message || 'Something went wrong.', true); } }
+function copyFingerprintButton(value) {
+  return button('Copy fingerprint', async () => {
+    try { await navigator.clipboard.writeText(value); }
+    catch { throw new Error('Could not copy fingerprint. Select and copy the displayed fingerprint manually.'); }
+    toast('Fingerprint copied. Compare it over a trusted, separate channel.');
+  });
+}
 async function api(path, method = 'GET', data) {
   const response = await fetch(`/api${path}`, { method, headers: { 'Content-Type': 'application/json', ...(me ? { 'X-CSRF-Token': me.csrf } : {}) }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
   const result = await response.json();
@@ -177,6 +184,7 @@ $('#channel-info').addEventListener('click', () => guard(async () => {
   if (!currentRoom) return; const devices = await api(`/rooms/${currentRoom.id}/devices`); await checkPins(devices); const body = modal('People & identity keys');
   body.append(el('p', '', 'Compare these fingerprints with each person over a trusted, separate channel before marking them verified. First-use pinning alone cannot detect a malicious server at first contact.'));
   for (const d of devices) { const card = el('div', 'fingerprint-card'), pin = vault.identity.pins[d.id]; card.append(el('strong', '', `${d.username} · ${d.label}`), el('p', '', `${pin.verified ? '✓ Verified identity' : '○ Pinned, not yet verified'} · key epoch ${d.revision}`), el('code', 'fingerprint', pin.fingerprint));
+    card.append(copyFingerprintButton(pin.fingerprint));
     if (!pin.verified) card.append(button('I compared this fingerprint', async () => { pin.verified = true; await persist(); toast('Identity fingerprint marked verified.'); $('#modal').close(); })); body.append(card); }
   if (currentRoom.owner === me.user.id) { const members = await api(`/rooms/${currentRoom.id}/members`); for (const u of members.filter(u => u.id !== me.user.id)) body.append(button(`Remove @${u.username} from channel`, async () => { await api(`/rooms/${currentRoom.id}/members`, 'DELETE', { user: u.id }); $('#modal').close(); await refreshRooms(); await openRoom(currentRoom.id); toast('Member removed. Future messages exclude their devices.'); }, 'text-button full')); }
 }));
@@ -220,7 +228,8 @@ async function renderDevices() {
     if (d.trusted) actions.append(button('Revoke', () => confirmAction('Revoke this device?', 'Active sessions will be disconnected and future encrypted messages will exclude this device. A revoked device identity cannot sign in again.', async () => { await api('/devices/revoke', 'POST', { device: d.id }); if (d.id === me.device) lock(); else await renderDevices(); }), 'secondary danger'));
     card.append(el('span', 'device-symbol', '▣'), detail, actions); target.append(card);
   }
-  const panel = el('section', 'panel'); panel.append(el('h3', '', 'Your identity fingerprint'), el('p', '', 'Share this over a trusted channel to verify this device. This is public key information, not a secret.'), el('code', 'fingerprint', await fingerprint(vault.identity.signing))); target.append(panel);
+  const fp = await fingerprint(vault.identity.signing);
+  const panel = el('section', 'panel'); panel.append(el('h3', '', 'Your identity fingerprint'), el('p', '', 'Share this over a trusted channel to verify this device. This is public key information, not a secret.'), el('code', 'fingerprint', fp), copyFingerprintButton(fp)); target.append(panel);
   const sessions = (await api('/security')).sessions, sessionPanel = el('section', 'panel'); sessionPanel.append(el('h3', '', 'Session activity'), el('p', '', 'Sessions expire after 8 hours, or 30 minutes without API activity. End an individual session without revoking its device.'));
   for (const s of sessions) {
     const row = el('div', 'event-row'), detail = el('div'), active = !s.revoked && s.expires > Date.now() && s.seen > Date.now() - 1800000;

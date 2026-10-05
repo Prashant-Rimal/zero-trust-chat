@@ -37,10 +37,34 @@ try {
   await bob.locator('#file-input').setInputFiles({ name: 'project-notes.txt', mimeType: 'text/plain', buffer: Buffer.from('Encrypted attachment test: private project notes.') }); await bob.locator('#message-input').fill('The notes are attached. Even the filename is encrypted in transit.'); await bob.locator('#send-button').click();
   await alice.getByRole('button', { name: /project-notes.txt/ }).waitFor();
   const downloaded = alice.waitForEvent('download'); await alice.getByRole('button', { name: /project-notes.txt/ }).click(); const download = await downloaded; assert.equal(download.suggestedFilename(), 'project-notes.txt'); checks.push('Encrypted file upload, delivery and local download');
-  await alice.locator('#channel-info').click(); await alice.getByRole('button', { name: 'I compared this fingerprint' }).click(); checks.push('Identity fingerprint verification');
+  await alice.evaluate(() => {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+      writeText: async value => { if (window.rejectClipboard) throw new Error('Clipboard denied'); window.copiedFingerprint = value; }
+    } });
+  });
+  await alice.locator('#channel-info').click();
+  const cards = alice.locator('.fingerprint-card');
+  for (const card of await cards.all()) {
+    const status = await card.locator('p').textContent();
+    await card.getByRole('button', { name: 'Copy fingerprint', exact: true }).click();
+    await alice.getByText('Fingerprint copied. Compare it over a trusted, separate channel.', { exact: true }).waitFor();
+    assert.equal(await alice.evaluate(() => window.copiedFingerprint), await card.locator('code').textContent());
+    assert.equal(await card.locator('p').textContent(), status);
+  }
+  await alice.evaluate(() => { window.rejectClipboard = true; });
+  await cards.first().getByRole('button', { name: 'Copy fingerprint', exact: true }).click();
+  await alice.locator('#toast.error').getByText('Could not copy fingerprint. Select and copy the displayed fingerprint manually.', { exact: true }).waitFor();
+  assert.equal(await alice.getByRole('button', { name: 'I compared this fingerprint' }).count(), 1);
+  await alice.evaluate(() => { window.rejectClipboard = false; });
+  checks.push('Copy full participant fingerprints without verifying identities; clipboard failure offers manual copying');
+  await alice.getByRole('button', { name: 'I compared this fingerprint' }).click(); checks.push('Identity fingerprint verification');
   await alice.locator('#toast').waitFor({ state: 'hidden' }); await alice.screenshot({ path: 'evidence/screenshots/chat-desktop.png', fullPage: true });
   await alice.locator('.nav-item[data-view=security]').click(); await alice.getByRole('heading', { name: 'Security center' }).waitFor(); await alice.screenshot({ path: 'evidence/screenshots/security-desktop.png', fullPage: true }); checks.push('Live security dashboard and administrator controls');
   await alice.locator('.nav-item[data-view=devices]').click(); await alice.getByRole('heading', { name: 'Your devices. Your control.' }).waitFor(); await alice.screenshot({ path: 'evidence/screenshots/devices-desktop.png', fullPage: true });
+  await alice.getByRole('button', { name: 'Copy fingerprint', exact: true }).click();
+  await alice.getByText('Fingerprint copied. Compare it over a trusted, separate channel.', { exact: true }).waitFor();
+  assert.equal(await alice.evaluate(() => window.copiedFingerprint), await alice.locator('#devices-view code.fingerprint').textContent());
+  checks.push('Copy own device identity fingerprint');
   await alice.locator('.nav-item[data-view=chat]').click(); await alice.setViewportSize({ width: 390, height: 844 }); await alice.screenshot({ path: 'evidence/screenshots/chat-mobile.png', fullPage: true });
   assert.equal(await alice.evaluate(() => document.documentElement.scrollWidth > innerWidth), false); checks.push('390px mobile layout without horizontal overflow');
   await alice.setViewportSize({ width: 1440, height: 1000 });
