@@ -1,0 +1,53 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-ink: #16241f;
+  --color-rail: #12332a;
+  --color-rail-soft: #1d4a3d;
+  --color-paper: #f7f6f1;
+  --color-panel: #ffffff;
+  --color-line: #e4e2d8;
+  --color-sage: #e6eedb;
+  --color-sage-strong: #cbdcb6;
+  --color-moss: #3c6a4d;
+  --color-muted: #66716b;
+  --color-warn: #a8580a;
+  --color-warn-soft: #fdf1dd;
+  --color-danger: #b3261e;
+  --color-danger-soft: #fbe9e7;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+  }
+  body {
+    background: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  button:not(:disabled),
+  [role='button'] {
+    cursor: pointer;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-moss);
+    outline-offset: 2px;
+  }
+  dialog::backdrop {
+    background: rgb(18 51 42 / 0.45);
+    backdrop-filter: blur(2px);
+  }
+}
+
+@utility eyebrow {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}

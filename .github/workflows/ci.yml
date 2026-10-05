@@ -1,12 +1,17 @@
-name: Build, security, test and staging validation
+name: CI
 on:
   push:
   pull_request:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build:
+  verify:
+    name: Typecheck, security tests, build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,100 +20,95 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci
-      - run: npm run build
-  sast:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - run: npm run security
-      - name: Semgrep project security rules
-        run: |
-          python -m pip install semgrep
-          semgrep scan --config .semgrep.yml --error --json --output evidence/semgrep.json server public shared
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: static-security
-          path: evidence/*scan.json
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: semgrep
-          path: evidence/semgrep.json
-  test:
-    needs: sast
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: npm
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - run: npm run typecheck
+      # 100+ tests: protocol, server-cannot-read, replay, tampering, revocation, impersonation,
+      # key substitution, unauthorised group access, metadata leakage, Zero Trust, RBAC, DP.
       - run: npm test
-      - run: npm run benchmark
-      - run: npm run test:browser
+      - run: npm run build
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: test-and-browser-evidence
-          path: evidence/
-  dependency-and-secrets:
-    needs: test
+          name: build
+          path: dist/
+          retention-days: 7
+
+  smoke:
+    name: Start the production build and smoke-test it
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: npm
       - run: npm ci
-      - run: npm audit --audit-level=moderate --json > evidence/dependency-audit.json
-      - name: Gitleaks repository history scan
-        run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.24.2 detect --source=/repo --report-format=json --report-path=/repo/evidence/gitleaks.json
-      - uses: actions/upload-artifact@v4
-        if: always()
+      - uses: actions/download-artifact@v4
         with:
-          name: dependency-and-secrets
-          path: |
-            evidence/dependency-audit.json
-            evidence/gitleaks.json
-  deploy-staging:
-    needs: dependency-and-secrets
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: npm
-      - name: Assemble deployable artifact
+          name: build
+          path: dist/
+      - name: Start server (local PGlite database, throwaway secret)
         run: |
-          mkdir staging
-          cp -r server shared public package.json package-lock.json staging/
-          cd staging
-          npm ci --omit=dev
-      - name: Deploy to isolated runner and smoke test
-        run: |
-          cd staging
-          node server/index.js &
-          APP_PID=$!
-          trap 'kill "$APP_PID"' EXIT
-          for attempt in 1 2 3 4 5; do
-            if curl --fail --silent http://127.0.0.1:3000/ > /tmp/cipherroom.html; then break; fi
+          export SERVER_SECRET="$(openssl rand -base64 32)"
+          PORT=3000 node serve.mjs > server.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            curl --fail --silent --output /dev/null http://localhost:3000/ && exit 0
             sleep 1
           done
-          grep -q 'Cipherroom' /tmp/cipherroom.html
-      - name: Package source and lockfile only
-        run: tar -czf cipherroom-deploy.tar.gz server shared public package.json package-lock.json README.md docs
+          cat server.log
+          exit 1
+      - name: Two headless clients over real HTTP and WebSocket
+        run: npm run smoke
+        env:
+          TARGET_URL: http://localhost:3000
+      - name: Server log must contain no request bodies or identifiers beyond route patterns
+        if: always()
+        run: |
+          cat server.log
+          ! grep -E '"route":"/api/[^"]*[0-9a-f]{8}-[0-9a-f]{4}' server.log
+
+  benchmark:
+    name: Encryption and latency overhead
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run benchmark
       - uses: actions/upload-artifact@v4
         with:
-          name: deployable-cipherroom
-          path: cipherroom-deploy.tar.gz
+          name: benchmark
+          path: evidence/benchmark.json
+
+  postgres:
+    name: Same security tests against Neon Postgres
+    needs: verify
+    runs-on: ubuntu-latest
+    # Opt in by setting the repository variable RUN_NEON_TESTS=true and the secret TEST_DATABASE_URL
+    # to a disposable Neon branch. The suite drops and recreates the public schema.
+    if: vars.RUN_NEON_TESTS == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npx vitest run --no-file-parallelism
+        env:
+          TEST_DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=moderate

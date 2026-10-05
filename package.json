@@ -1,19 +1,49 @@
 {
   "name": "cipherroom",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24.0.0" },
-  "scripts": {
-    "start": "node server/index.js",
-    "dev": "node --watch server/index.js",
-    "build": "node scripts/check.js",
-    "test": "node scripts/test-evidence.js",
-    "security": "node scripts/security.js",
-    "benchmark": "node scripts/benchmark.js",
-    "test:browser": "node scripts/browser.js",
-    "verify": "npm run build && npm run security && npm test && npm run benchmark"
+  "engines": {
+    "node": ">=22.12.0"
   },
-  "dependencies": { "ws": "^8.18.3" },
-  "devDependencies": { "@playwright/test": "^1.56.0" }
+  "scripts": {
+    "dev": "vite dev --port 3000",
+    "build": "vite build",
+    "start": "node --env-file-if-exists=.env serve.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "benchmark": "vitest run --config vitest.bench.config.ts",
+    "smoke": "vitest run --config vitest.smoke.config.ts",
+    "verify": "npm run typecheck && npm test && npm run build",
+    "migrate": "node --env-file=.env scripts/migrate.mjs"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@noble/ciphers": "^2.4.0",
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
+    "@tanstack/react-router": "^1.170.41",
+    "@tanstack/react-start": "^1.168.60",
+    "pg": "^8.23.1",
+    "qrcode": "^1.5.4",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "ws": "^8.22.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^26.6.4",
+    "@types/pg": "^8.23.1",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/ws": "^8.18.2",
+    "@vitejs/plugin-react": "^6.1.2",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.2",
+    "vitest": "^5.0.3"
+  },
+  "description": "End-to-end encrypted real-time messaging with a Zero Trust device model, built on TanStack Start."
 }
