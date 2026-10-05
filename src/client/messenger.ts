@@ -61,6 +61,8 @@ export type VaultState = {
   messages: Record<string, Array<LocalMessage>>
   notices: Array<Notice>
   usernames: Record<string, string>
+  /** Set once this device has completed sign-in with the server at least once. */
+  enrolled?: boolean
 }
 
 export type Conversation = {
