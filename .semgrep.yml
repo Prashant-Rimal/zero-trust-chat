@@ -1,0 +1,25 @@
+rules:
+  - id: no-dynamic-code-execution
+    languages: [javascript]
+    severity: ERROR
+    message: Dynamic code execution is forbidden in the encrypted endpoint and relay.
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: new Function(...)
+  - id: no-request-body-logging
+    languages: [javascript]
+    severity: ERROR
+    message: Request bodies may contain credentials or sensitive protocol material.
+    pattern-either:
+      - pattern: console.log(..., $REQ.body, ...)
+      - pattern: console.error(..., $REQ.body, ...)
+  - id: no-weak-random-for-crypto
+    languages: [javascript]
+    severity: ERROR
+    message: Use the platform cryptographic random generator.
+    pattern: Math.random(...)
+  - id: no-disabled-tls-verification
+    languages: [javascript]
+    severity: ERROR
+    message: Never disable TLS certificate verification.
+    pattern: '{rejectUnauthorized: false}'

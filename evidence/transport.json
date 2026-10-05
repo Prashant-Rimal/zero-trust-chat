@@ -1,0 +1,7 @@
+{
+  "generatedAt": "2026-10-05T11:42:40.225Z",
+  "httpToWebSocketMs": 8.420900000000074,
+  "scope": "One loopback integration delivery, includes assertion/decryption time; not an internet latency benchmark",
+  "plaintextAbsentFromMessageRows": true,
+  "plaintextAbsentFromAuditRows": true
+}

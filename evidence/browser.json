@@ -1,0 +1,20 @@
+{
+  "generatedAt": "2026-10-05T11:42:42.743Z",
+  "browser": "154.0.8037.97",
+  "checks": [
+    "Two independent browser contexts complete mandatory MFA enrollment",
+    "Group message delivered over WebSocket and decrypted in the recipient browser",
+    "Encrypted file upload, delivery and local download",
+    "Identity fingerprint verification",
+    "Live security dashboard and administrator controls",
+    "390px mobile layout without horizontal overflow",
+    "Real browser messages and attachment filenames absent from SQLite rows",
+    "Browser persistence contains encrypted vault, no message plaintext",
+    "Key rotation discards old epoch access and new messages decrypt successfully",
+    "Direct messaging and HTML injection rendered as inert literal text",
+    "Administrator revocation immediately locks the connected recipient browser",
+    "No uncaught browser JavaScript errors"
+  ],
+  "errors": [],
+  "status": "passed"
+}

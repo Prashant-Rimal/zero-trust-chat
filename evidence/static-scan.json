@@ -1,0 +1,20 @@
+{
+  "generatedAt": "2026-10-05T11:42:38.450Z",
+  "tool": "Cipherroom focused static policy scan",
+  "scope": [
+    "server",
+    "public",
+    "shared"
+  ],
+  "files": 7,
+  "rules": [
+    "dynamic-eval",
+    "shell-execution",
+    "private-key-material",
+    "cloud-access-key",
+    "request-body-logging",
+    "dynamic-inner-html"
+  ],
+  "findings": [],
+  "limitation": "Focused policy checks, not a general-purpose SAST engine. CI additionally runs Semgrep and Gitleaks."
+}

@@ -1,0 +1,19 @@
+{
+  "name": "cipherroom",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24.0.0" },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "build": "node scripts/check.js",
+    "test": "node scripts/test-evidence.js",
+    "security": "node scripts/security.js",
+    "benchmark": "node scripts/benchmark.js",
+    "test:browser": "node scripts/browser.js",
+    "verify": "npm run build && npm run security && npm test && npm run benchmark"
+  },
+  "dependencies": { "ws": "^8.18.3" },
+  "devDependencies": { "@playwright/test": "^1.56.0" }
+}
