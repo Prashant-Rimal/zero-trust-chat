@@ -196,7 +196,8 @@ export async function signIn(mode: 'login' | 'register', usernameInput: string, 
     } else opened = newVault()
     vault = opened
     vaultKey = keys.vaultKey
-    set({ username, newDevice: !opened.enrolled })
+    // Vaults saved before the `enrolled` marker existed have still uploaded prekeys, which only happens at sign-in.
+    set({ username, newDevice: !sealed || !(opened.enrolled || opened.keys.nextOpkId > 1) })
 
     // Reloading the page drops the vault key from memory; if the server session is still valid
     // for this exact device, unlocking the vault is enough.
