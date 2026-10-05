@@ -124,7 +124,7 @@ export function AuthScreen() {
                 }}
               >
                 <Field label="Authenticator code" name="code" inputMode="numeric" autoComplete="one-time-code" required pattern="[0-9]{6}" maxLength={6} placeholder="000000" value={code} onChange={(e) => setCode(e.target.value)} autoFocus />
-                <Field label="Name this device" name="label" required maxLength={48} value={label} onChange={(e) => setLabel(e.target.value)} hint="Shown in your device list so you can recognise it." />
+                {app.newDevice && <Field label="Name this device" name="label" required maxLength={48} value={label} onChange={(e) => setLabel(e.target.value)} hint="Shown in your device list so you can recognise it." />}
                 <Button type="submit" variant="primary" className="w-full py-2.5" disabled={app.busy}>
                   {app.busy ? 'Verifying…' : 'Verify and continue'}
                 </Button>

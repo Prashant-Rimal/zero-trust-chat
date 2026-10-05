@@ -13,6 +13,8 @@ export type AppState = {
   username: string
   me: Me | null
   enrol: { secret: string; uri: string } | null
+  /** True when this browser has never completed sign-in for the account, so the device needs a name. */
+  newDevice: boolean
   connection: 'offline' | 'connecting' | 'live'
   /** Bumped when the messenger's state changes, so components re-read it. */
   version: number
@@ -23,7 +25,7 @@ export type AppState = {
   lastSend: { encryptMs: number; totalMs: number; recipients: number } | null
 }
 
-let state: AppState = { phase: 'locked', busy: false, username: '', me: null, enrol: null, connection: 'offline', version: 0, remote: 0, toast: null, stepUp: null, lastSend: null }
+let state: AppState = { phase: 'locked', busy: false, username: '', me: null, enrol: null, newDevice: true, connection: 'offline', version: 0, remote: 0, toast: null, stepUp: null, lastSend: null }
 const listeners = new Set<() => void>()
 function set(patch: Partial<AppState>) {
   state = { ...state, ...patch }
@@ -194,7 +196,7 @@ export async function signIn(mode: 'login' | 'register', usernameInput: string, 
     } else opened = newVault()
     vault = opened
     vaultKey = keys.vaultKey
-    set({ username })
+    set({ username, newDevice: !opened.enrolled })
 
     // Reloading the page drops the vault key from memory; if the server session is still valid
     // for this exact device, unlocking the vault is enough.
@@ -234,6 +236,7 @@ async function enter(me: Me) {
   messenger = new Messenger(vault!, transport, persist)
   messenger.me = me
   messenger.subscribe(() => set({ version: state.version + 1 }))
+  vault!.enrolled = true
   set({ phase: 'ready', me, enrol: null })
   await persist(vault!)
   await messenger.start(me)
