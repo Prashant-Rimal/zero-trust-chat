@@ -1,61 +1,62 @@
-# Architecture and success criteria
+# Architecture
 
-## Real-world problem
+## Components
 
-A small design/research team needs confidential collaboration even if its message storage is exposed. Assets are message/attachment plaintext, private keys, account credentials, authenticator seeds, valid sessions and private membership relationships. Users include ordinary collaborators and a narrowly privileged security administrator. Administrators may review security events and revoke accounts, but are not given participant decryption keys.
-
-## Trust boundaries / data flow
-
-```mermaid
-flowchart LR
-  subgraph endpointA[Trusted endpoint A]
-    UIA[Chat UI and plaintext in memory]
-    VA[Password encrypted browser vault]
-    CA[WebCrypto: sign and encrypt]
-    VA --> CA
-    UIA --> CA
-  end
-  subgraph relay[Relay boundary: no message decryption keys]
-    HTTP[HTTP API / WSS events]
-    AUTH[Session, device, membership and role checks]
-    DB[(SQLite ciphertext, public keys and metadata)]
-    AUDIT[Content-free security audit]
-    HTTP --> AUTH --> DB
-    AUTH --> AUDIT
-  end
-  subgraph endpointB[Trusted endpoint B]
-    VB[Password encrypted browser vault]
-    CB[Verify identity / signature / decrypt]
-    UIB[Plaintext in memory]
-    VB --> CB --> UIB
-  end
-  CA -->|Signed ciphertext + wrapped per-device keys| HTTP
-  HTTP -->|Authorized ciphertext event| CB
+```
+ Browser (trusted)                         Relay (untrusted for content)            Postgres
+┌────────────────────────────┐            ┌───────────────────────────────┐       ┌────────────────┐
+│ React UI (TanStack Router) │            │ TanStack Start server entry   │       │ users, devices │
+│ session.ts  ── IndexedDB   │  HTTPS     │  ├ SSR shell + CSP nonce      │       │ prekeys        │
+│   vault sealed with        │──────────▶ │  └ /api/$ → app.handle()      │ ────▶ │ sessions       │
+│   password-derived key     │            │       policy table            │       │ conversations  │
+│ messenger.ts               │  WSS /ws   │       authenticate/authorize  │       │ members        │
+│   X3DH, Double Ratchet,    │◀──────────▶│  realtime hub                 │       │ envelopes (ct) │
+│   pins, signed rosters     │            │       re-checks session on    │       │ attachments(ct)│
+│ protocol.ts (noble)        │            │       every frame + delivery  │       │ replays, audit │
+└────────────────────────────┘            └───────────────────────────────┘       │ usage_*        │
+                                                                                  └────────────────┘
 ```
 
-The server is trusted for authentication, membership enforcement, availability and serving the original client code. Content confidentiality does not rely on server-side message decryption. These are different trust assumptions: E2EE cannot protect a browser whose JavaScript has been replaced by the same server.
+The split that matters: `src/shared/protocol.ts` and `src/client/messenger.ts` hold every key and every plaintext and never import server code. `src/server/app.ts` never imports client code and has no function that takes plaintext.
 
-## Stack and decisions
+## Why these choices
 
-- Node.js 24 HTTP server and built-in SQLite; a single production dependency, `ws`.
-- Browser WebCrypto and plain JavaScript/CSS. No third-party scripts, fonts, analytics or service worker.
-- Public cryptographic wire format in `shared/protocol.js`; the browser and server agree on canonical field order.
-- SQLite prepared statements for dynamic values; explicit static route allowlist; body size bounds and strict key/envelope checks.
-- WebSockets carry notifications and ciphertext. Writes use the authenticated, CSRF-protected HTTP API, giving one validation path.
-- Immutable room participant additions: create a new channel to add members. Owners can remove members. New devices receive only future envelopes. Removed members lose API access to the room; saved prior content cannot be recalled.
-- No typing indicators, read receipts, persistent IP address audit fields, external telemetry or plaintext search index.
+**TanStack Start.** File routes give the UI; one catch-all server route (`src/routes/api/$.ts`) hands `/api/*` to the relay. The relay is a plain `handle(Request) → Response` function, so the test suite calls it directly without a framework or a port. A custom server entry (`src/server.ts`) adds security headers and a per-request CSP nonce.
 
-## Measurable criteria
+**WebSockets beside Start.** Start has no built-in WebSocket story, so `src/server/realtime.ts` attaches a `ws` server to the HTTP `upgrade` event. In development a small Vite plugin does the attaching; in production `serve.mjs` does. Both call the same `app.realtime.connect()`.
 
-| Criterion | Measurement / target |
-|---|---|
-| Protected content absent from relay persistence | Integration and browser tests search message/audit records for plaintext sentinels and attachment filenames; zero occurrences |
-| Authentication bypass resistance | Password without second factor yields no session; MFA replay rejected; role and origin failures return 401/403 |
-| Tampering / replay | Signed-field alteration is rejected; duplicate ID yields 409, with an audit signal |
-| Group authorization | Outsider cannot read devices, members or messages; stale recipient device set yields 409 |
-| Revocation | Connected device/account closed immediately by explicit revocation; API access returns 401; background checks every 5 seconds |
-| Key lifecycle | Rotation increments signed epoch; earlier messages unavailable with new key; subsequent messages decrypt |
-| Local crypto overhead | Report median/p95 for 40 x 1 KiB messages / two recipients; target p95 encryption < 20 ms on developer machine, not a service SLA |
-| Frontend | Two isolated browser users exchange text and file; mobile viewport has no horizontal overflow; no uncaught JS errors |
+**Postgres through a thin adapter.** `src/server/db.ts` exposes `query` and `tx` over either `pg` (Neon) or PGlite (in-process Postgres compiled to WASM). Same SQL, same schema. Development and CI need no database server.
 
-The database stores only the latest 100 messages per history query; no pagination exists in this prototype. Room size is capped at 21 users and message delivery at 100 devices. There is no production capacity guarantee.
+**Pairwise fan-out for groups, not sender keys.** A group message is encrypted separately for each recipient device over its own Double Ratchet session. It costs about 0.03 ms per device (see ASSURANCE) and gives groups the same forward secrecy and post-compromise recovery as one-to-one chats. Removing a member takes effect immediately with no group re-key.
+
+**Local history.** Double Ratchet keys are deleted after use, so the server copy of a message cannot be decrypted twice. Each device keeps its own history, sealed with the vault key, and the server deletes ciphertext as soon as the recipient device acknowledges it.
+
+## Request lifecycle
+
+Every non-public route declares a policy:
+
+```ts
+route('POST', '/api/devices/:id/approve', { access: 'trusted', stepUp: true, body: schema }, handler)
+```
+
+`handle()` then runs, in order: route match → Origin check (non-GET) → `authenticate` (session valid, not idle, not expired, account active, device not revoked, context unchanged) → CSRF token → rate limit → `authorize` (device trust level, role permission, step-up freshness) → body size limit and schema validation → handler. Nothing is cached between requests. WebSocket frames go through the same `authenticate` and `authorize`.
+
+## Sign-in
+
+1. Browser derives `master = PBKDF2(password, salt = H(username), 600k)`, then `authKey` and `vaultKey` by HKDF with different labels.
+2. `authKey` goes to the server, which stores `scrypt(authKey)`. `vaultKey` unseals the IndexedDB vault and never leaves the device.
+3. Server returns a single-use challenge. Browser sends the TOTP code, the device's public keys, and an Ed25519 signature over the challenge.
+4. Server sets an HttpOnly, SameSite=Strict session cookie (only its SHA-256 is stored) and returns a CSRF token.
+
+After a page reload the vault key is gone from memory. If the server session is still valid for that device, entering the password alone unlocks the vault; otherwise the full flow runs.
+
+## Realtime
+
+Server → client frames: `envelope` (ciphertext for this device), `sync` (conversations / devices / security changed — refetch), `sent` (result of a send).
+Client → server frames: `send`, `ack`, `ping`.
+
+Before each push the hub runs one query to confirm every target socket's session is still alive; dead ones are closed with code 4001 instead of receiving the frame.
+
+## Scaling notes
+
+Rate limits and the hub live in process memory, so run one instance. Going multi-instance needs a shared limiter and a pub/sub channel (Postgres `LISTEN/NOTIFY` on a direct, non-pooled connection would do). The database schema needs no change.

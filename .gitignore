@@ -1,7 +1,8 @@
 node_modules/
+dist/
 data/
 .env
-playwright-report/
-test-results/
+.claude/
+.tanstack/
 *.log
 coverage/

@@ -1,39 +1,81 @@
-# Running and deploying
+# Deployment
 
-## Local operation
+The app is **one long-running Node process** that serves HTTP and WebSocket on the same port, plus a Postgres database. It is not a fit for request-scoped serverless functions, because WebSocket connections and the realtime hub need a process that stays up.
 
-`npm start` serves on 127.0.0.1:3000. Stop with Ctrl+C. To change the port, set both PORT and APP_ORIGIN:
+No container is required. Any host that can run `node serve.mjs` behind TLS works (a VM, Railway, Render, Fly Machines, a university server).
 
-```powershell
-$env:PORT = '3010'
-$env:APP_ORIGIN = 'http://127.0.0.1:3010'
+## 1. Database (Neon)
+
+1. Create a Neon project and copy the **pooled** connection string.
+2. Nothing else: the schema is created on first boot (`migrate()` in `src/server/db.ts`; every statement is `IF NOT EXISTS`).
+
+For CI, create a separate Neon branch and use it as `TEST_DATABASE_URL`. The test suite drops and recreates the `public` schema, so never point it at real data.
+
+## 2. Environment
+
+| Variable | Required | Meaning |
+|---|---|---|
+| `DATABASE_URL` | yes | Neon pooled connection string |
+| `SERVER_SECRET` | yes | 32 random bytes, base64. Seals TOTP seeds, keys pseudonyms. **Back it up**: losing it locks everyone out of 2FA |
+| `APP_ORIGIN` | yes | Public origin, e.g. `https://chat.example.com`. Must match exactly what browsers send |
+| `PORT`, `HOST` | no | Default `3000`, `0.0.0.0` |
+| `TRUST_PROXY` | behind a proxy | `1` if exactly one trusted reverse proxy appends `X-Forwarded-For` |
+| `DP_EPSILON`, `DP_WINDOW_MINUTES` | no | Analytics privacy parameters (default `1`, `1440`) |
+
+Generate the secret:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+```
+
+## 3. Build and run
+
+```bash
+npm ci
+```
+
+```bash
+npm run build
+```
+
+```bash
 npm start
 ```
 
-Environment variables are read from the process environment, not automatically from `.env`. `.env.example` documents available names. `DATA_DIR` chooses a persistent directory. Do not commit that directory, master key, database or backups.
+The process refuses to start if `SERVER_SECRET` is missing or the database is unreachable.
 
-## HTTPS deployment requirements
+## 4. TLS and proxy
 
-The app intentionally defaults to loopback. Before exposing it elsewhere:
+Terminate TLS in front of the app and forward both HTTP and WebSocket upgrades to it. With `APP_ORIGIN` starting `https://` the app sets `Secure` cookies and HSTS.
 
-1. Enroll the intended first administrator in a controlled environment; introduce invite-only provisioning before public registration.
-2. Use an HTTPS reverse proxy with WebSocket forwarding and a real certificate. Set APP_ORIGIN to the **exact external HTTPS origin**, and COOKIE_SECURE=1. Leave the Node listener on a private/loopback interface.
-3. Forward `/ws` upgrades. Do not log request bodies, cookies, CSRF tokens, MFA seeds or credentials. Disable proxy query/body capture. Review access-log retention: this app's metadata minimization cannot control upstream logs.
-4. Run under a dedicated unprivileged OS user. Restrict `data/` access to that account; use Windows ACLs or Unix permissions and encrypted volumes. A 0600 creation mode is not an NTFS ACL policy.
-5. Secure and encrypt backups; store the server master key separately in a managed secret system for production. Current local `master.key` is co-located for reproducibility, not production key custody. Never delete it while expecting MFA data to remain usable.
-6. Add persistent/distributed rate limiting and limits for users/devices/channels; enforce reverse-proxy body and connection limits. Current in-memory rate limiting and synchronous SQLite suit a local lab.
-7. Use a vetted messaging protocol, external security assessment, signed/reproducible client distribution and key transparency before relying on it for sensitive real-world communications.
+Set `TRUST_PROXY=1` only if the proxy is the sole way to reach the app. Otherwise clients could spoof their network identity and weaken per-IP rate limits and session-context checks.
 
-No host-based encryption protects metadata while the application process is compromised. No app-level E2EE protects clients when malicious code runs in their browser.
+## 5. After deploying
 
-## CI / delivery
+```bash
+TARGET_URL=https://chat.example.com npm run smoke
+```
 
-Workflow stages: **Build → SAST → Test → Dependency/Secrets → isolated staging deploy + smoke test + artifact**. Each stage gates the next. Jobs have read-only repository permissions. Reports are uploaded even when tests fail. Semgrep project rules and Gitleaks history checks supplement the local focused scanner.
+Registers two throwaway accounts and exchanges encrypted messages and a file over the real network path. Then create your own account first: **the first account to complete two-factor setup becomes the administrator.**
 
-The deploy stage runs the assembled app inside a disposable runner and checks its homepage. It does **not** deploy to a public cloud, create infrastructure or publish secrets. A later production deploy needs an explicitly chosen host, protected environment, TLS, secret management, backups and rollback policy. Pin CI tools/actions to reviewed immutable versions/digests before production; Semgrep currently installs from the package index.
+## CI (GitHub Actions)
 
-## Recovery limitations
+`.github/workflows/ci.yml`:
 
-Revoked accounts/devices are deliberately not reactivated in the UI. A revoked device needs a new device identity after legitimate account verification; use a fresh browser profile. In a lab, a completely new account/channel demonstrates recovery after containment. Do not edit SQLite records to silently bypass MFA. No password or authenticator reset implementation exists yet.
+| Job | Does |
+|---|---|
+| `verify` | `npm ci`, typecheck, the full security test suite, production build |
+| `smoke` | Starts the built server on the runner and runs the two-client smoke test over real HTTP/WebSocket; fails if the server log contains ids in route fields |
+| `benchmark` | Runs the overhead benchmark and uploads `benchmark.json` |
+| `postgres` | Re-runs the security suite against Neon. Opt in with repository variable `RUN_NEON_TESTS=true` and secret `TEST_DATABASE_URL` |
+| `audit` | `npm audit` at moderate severity |
 
-Start a fresh disposable lab by setting DATA_DIR to a **new empty path**, rather than deleting existing evidence or user data. Existing browser identities can be isolated with a fresh browser profile. Retained ciphertext does not become readable by a replacement device.
+Deployment itself is not automated yet; add a job for your chosen host once it is decided.
+
+## Operations
+
+- **Single instance.** Rate limits and the realtime hub are in memory.
+- **Idle cost.** Background sweeps only run while requests arrive or sockets are connected, so a Neon database can suspend when nobody is online.
+- **Data retention.** Queued ciphertext: until delivered or expired. Audit: 30 days. Expired sessions: 24 hours. Unfinished sign-ups: 1 hour.
+- **Rotating `SERVER_SECRET`** is not supported without re-enrolling TOTP for every account.
+- **Backups** contain ciphertext, public keys, hashed login keys and sealed TOTP seeds. They do not contain message content or private keys.
