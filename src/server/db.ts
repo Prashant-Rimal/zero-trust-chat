@@ -68,6 +68,8 @@ const SCHEMA = [
     totp TEXT NOT NULL,
     totp_step BIGINT NOT NULL DEFAULT 0,
     created BIGINT NOT NULL)`,
+  // Contact address collected at sign-up, for records only. It is not verified and not used to sign in.
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT`,
   `CREATE TABLE IF NOT EXISTS devices (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

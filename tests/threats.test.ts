@@ -347,6 +347,37 @@ describe('metadata leakage', () => {
     expect(await dump(world.db)).not.toContain('Secret project name')
   })
 
+  it('keeps the sign-up email as a record that only administrators and auditors can read', async () => {
+    const admin = await signUp(world, 'md_admin_view')
+    await world.db.query(`UPDATE users SET role = 'admin' WHERE id = $1`, [admin.me.user.id])
+    const member = await signUp(world, 'md_email_owner')
+    const peer = await signUp(world, 'md_email_peer')
+    const conv = await member.messenger.createConversation('direct', [peer.me.user.id])
+    const [row] = await world.db.query(`SELECT email FROM users WHERE id = $1`, [member.me.user.id])
+    expect(row.email).toBe('md_email_owner@example.test')
+    const overview = await admin.api('GET', '/api/admin/overview')
+    expect(overview.users.find((u: any) => u.id === member.me.user.id).email).toBe('md_email_owner@example.test')
+    // Nothing an ordinary member can call returns anyone's address, including their own contacts'.
+    const visible = JSON.stringify([
+      await peer.api('GET', '/api/users?q=md_email'),
+      await peer.api('GET', `/api/conversations/${conv}/directory`),
+      await peer.api('GET', '/api/conversations'),
+      await peer.api('GET', '/api/me'),
+      await peer.api('GET', '/api/security'),
+    ])
+    expect(visible).not.toContain('@example.test')
+    expect((await peer.raw('GET', '/api/admin/overview')).status).toBe(403)
+    expect(world.logs.join(' ')).not.toContain('@example.test')
+  })
+
+  it('requires a well-formed email at sign-up and normalises it', async () => {
+    const attempt = (email: unknown) =>
+      world.app.handle(new Request(`${ORIGIN}/api/auth/register`, { method: 'POST', headers: { origin: ORIGIN, 'content-type': 'application/json' }, body: JSON.stringify({ username: `md_e${Math.random().toString(36).slice(2, 8)}`, email, authKey: P.b64(new Uint8Array(32)) }) }), { ip: '10.8.8.8' })
+    for (const bad of [undefined, '', 'not-an-email', 'a@b', 'two words@example.test', `${'x'.repeat(250)}@example.test`]) expect((await attempt(bad)).status, String(bad)).toBe(400)
+    expect((await attempt('  Mixed.Case@Example.TEST ')).status).toBe(200)
+    expect(await world.db.query(`SELECT 1 FROM users WHERE email = 'mixed.case@example.test'`)).toHaveLength(1)
+  })
+
   it('audit records carry event kinds and opaque ids only', async () => {
     const rows = await world.db.query<{ detail: Record<string, unknown> }>(`SELECT detail FROM audit`)
     const allowed = new Set(['device', 'trust', 'kind', 'by', 'target', 'role', 'attempts', 'added', 'removed', 'network', 'browser'])

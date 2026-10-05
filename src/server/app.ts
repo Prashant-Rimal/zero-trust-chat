@@ -55,6 +55,12 @@ const signature = z.string().length(88).regex(/^[A-Za-z0-9+/]{86}==$/)
 const id = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
 const int = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 const username = z.string().regex(/^[a-z][a-z0-9_.-]{2,23}$/)
+const email = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(254)
+  .regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)
 const spkSchema = z.strictObject({ id: int.max(2 ** 31 - 1), pub: key, sig: signature })
 const opkSchema = z.strictObject({ id: int.max(2 ** 31 - 1), pub: key })
 const rosterSchema = z.strictObject({
@@ -393,10 +399,10 @@ export function createApp(options: AppOptions) {
 
   // ----- authentication -----
 
-  route<{ username: string; authKey: string }>(
+  route<{ username: string; email: string; authKey: string }>(
     'POST',
     '/api/auth/register',
-    { access: 'public', body: z.strictObject({ username, authKey: key }) },
+    { access: 'public', body: z.strictObject({ username, email, authKey: key }) },
     async ({ body, ip }) => {
       rate(`register:${ip}`, 10, HOUR)
       if (await one(`SELECT 1 FROM users WHERE username = $1`, [body.username])) fail(409, 'Username unavailable.')
@@ -404,9 +410,10 @@ export function createApp(options: AppOptions) {
       const totpSecret = newTotpSecret()
       const challenge = random()
       const now = Date.now()
-      await db.query(`INSERT INTO users(id, username, auth_hash, totp, created) VALUES ($1, $2, $3, $4, $5)`, [
+      await db.query(`INSERT INTO users(id, username, email, auth_hash, totp, created) VALUES ($1, $2, $3, $4, $5, $6)`, [
         userId,
         body.username,
+        body.email,
         await hashSecret(body.authKey),
         sealAtRest(totpSecret, secret),
         now,
@@ -833,7 +840,7 @@ export function createApp(options: AppOptions) {
       `SELECT a.id, a.kind, a.severity, a.detail, a.created, u.username FROM audit a LEFT JOIN users u ON u.id = a.user_id ORDER BY a.id DESC LIMIT 200`,
     )
     const users = await db.query(
-      `SELECT u.id, u.username, u.role, u.status, u.created,
+      `SELECT u.id, u.username, u.email, u.role, u.status, u.created,
         (SELECT COUNT(*)::int FROM devices d WHERE d.user_id = u.id AND d.trust = 'trusted') AS devices,
         (SELECT MAX(seen) FROM sessions x WHERE x.user_id = u.id) AS seen
        FROM users u WHERE u.status <> 'pending' ORDER BY u.username`,

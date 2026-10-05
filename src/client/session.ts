@@ -178,7 +178,7 @@ async function refreshMe() {
 
 // ---------- sign-in ----------
 
-export async function signIn(mode: 'login' | 'register', usernameInput: string, password: string) {
+export async function signIn(mode: 'login' | 'register', usernameInput: string, password: string, email = '') {
   const username = usernameInput.trim().toLowerCase()
   set({ busy: true })
   try {
@@ -205,7 +205,10 @@ export async function signIn(mode: 'login' | 'register', usernameInput: string, 
         if (me.user.username === username && me.device.id === opened.keys.deviceId) return await enter(me)
       }
     }
-    const result = await api('POST', mode === 'login' ? '/api/auth/login' : '/api/auth/register', { username, authKey: keys.authKey })
+    const result =
+      mode === 'login'
+        ? await api('POST', '/api/auth/login', { username, authKey: keys.authKey })
+        : await api('POST', '/api/auth/register', { username, email: email.trim(), authKey: keys.authKey })
     challenge = result.challenge
     set({ phase: 'mfa', enrol: result.secret ? { secret: result.secret, uri: result.uri } : null })
   } finally {
