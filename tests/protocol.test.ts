@@ -86,6 +86,31 @@ describe('X3DH + Double Ratchet', () => {
     expect(str(P.ratchetDecrypt(sb, next).plaintext)).toBe('again')
   })
 
+  it('rejects replay of an out-of-order encrypted message after its skipped key is consumed', () => {
+    let { a, b, sa, sb } = pair()
+    const delayed = P.ratchetEncrypt(sa, ctx(a.deviceId, b.deviceId), text('deliver once'))
+    const later = P.ratchetEncrypt(sa, ctx(a.deviceId, b.deviceId), text('delivered first'))
+    const first = P.ratchetDecrypt(sb, later)
+    sb = first.session
+    expect(str(first.plaintext)).toBe('delivered first')
+    const skippedKey = `${delayed.header.dh}|${delayed.header.n}`
+    expect(sb.skipped).toHaveProperty(skippedKey)
+
+    const received = P.ratchetDecrypt(sb, delayed)
+    sb = received.session
+    expect(str(received.plaintext)).toBe('deliver once')
+    expect(sb.skipped).not.toHaveProperty(skippedKey)
+
+    // Replay the exact envelope, preserving its ID, nonce, header and ciphertext.
+    const beforeReplay = structuredClone(sb)
+    expect(() => P.ratchetDecrypt(sb, delayed)).toThrow(P.ProtocolError)
+    expect(() => P.ratchetDecrypt(sb, delayed)).toThrow(expect.objectContaining({ code: 'replay' }))
+    expect(sb).toEqual(beforeReplay)
+
+    const next = P.ratchetEncrypt(sa, ctx(a.deviceId, b.deviceId), text('still usable'))
+    expect(str(P.ratchetDecrypt(sb, next).plaintext)).toBe('still usable')
+  })
+
   it('rejects tampering with ciphertext, header or any envelope context field', () => {
     const { a, b, sa, sb } = pair()
     const m = P.ratchetEncrypt(sa, ctx(a.deviceId, b.deviceId), text('integrity'))
