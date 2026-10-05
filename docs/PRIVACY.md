@@ -19,6 +19,7 @@
 | Data | Why it is needed | Retention |
 |---|---|---|
 | Usernames, roles, account status | Authentication, RBAC | Life of the account |
+| Email address, as entered at sign-up (unverified) | Record-keeping only. Not used for sign-in, recovery or search. Returned only by the admin overview (`audit:read`) | Life of the account |
 | Device public keys, labels, trust state | Key directory | Life of the device record |
 | Conversation id, kind, owner, member list (signed roster) | Routing and access control | Life of the conversation |
 | Sender device, recipient device, timestamps, size class of each queued message | Delivery | **Until the recipient device acknowledges**, or expiry, whichever is first |

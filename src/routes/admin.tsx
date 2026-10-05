@@ -9,7 +9,7 @@ import { Badge, Button, PageHeader, Panel, when } from '~/components/ui'
 
 export const Route = createFileRoute('/admin')({ component: Admin })
 
-type User = { id: string; username: string; role: 'member' | 'auditor' | 'admin'; status: 'active' | 'revoked'; devices: number; seen: number | null }
+type User = { id: string; username: string; email: string | null; role: 'member' | 'auditor' | 'admin'; status: 'active' | 'revoked'; devices: number; seen: number | null }
 type Analytics = {
   windowMs: number
   epsilonPerMetric: number
@@ -57,6 +57,7 @@ function Admin() {
             <thead className="eyebrow">
               <tr>
                 <th className="py-2 pr-4 font-semibold">Account</th>
+                <th className="py-2 pr-4 font-semibold">Email</th>
                 <th className="py-2 pr-4 font-semibold">Role</th>
                 <th className="py-2 pr-4 font-semibold">Devices</th>
                 <th className="py-2 pr-4 font-semibold">Last active</th>
@@ -73,6 +74,7 @@ function Admin() {
                     <td className="py-3 pr-4 font-medium whitespace-nowrap">
                       @{u.username} {self && <span className="font-normal text-muted">(you)</span>} {u.status === 'revoked' && <Badge tone="danger">REVOKED</Badge>}
                     </td>
+                    <td className="py-3 pr-4 whitespace-nowrap text-muted">{u.email ?? '—'}</td>
                     <td className="py-3 pr-4">
                       {assign && !self ? (
                         <select

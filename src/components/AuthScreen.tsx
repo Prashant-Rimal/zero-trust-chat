@@ -26,6 +26,7 @@ export function AuthScreen() {
   const app = useApp()
   const [mode, setMode] = useState<'login' | 'register'>('login')
   const [username, setUsername] = useState('')
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [code, setCode] = useState('')
   const [label, setLabel] = useState(defaultLabel)
@@ -72,12 +73,15 @@ export function AuthScreen() {
                 onSubmit={(event) => {
                   event.preventDefault()
                   void guard(async () => {
-                    await signIn(mode, username, password)
+                    await signIn(mode, username, password, email)
                     setPassword('')
                   })
                 }}
               >
                 <Field label="Username" name="username" autoComplete="username" required pattern="[a-zA-Z][a-zA-Z0-9_.\-]{2,23}" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="alex.morgan" hint={mode === 'register' ? '3–24 letters, numbers, dots, dashes or underscores.' : undefined} />
+                {mode === 'register' && (
+                  <Field label="Email" name="email" type="email" autoComplete="email" required maxLength={254} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="alex@example.com" hint="Kept for the workspace’s records and visible to its administrators. Not verified, and not used to sign in." />
+                )}
                 <Field
                   label="Password"
                   name="password"

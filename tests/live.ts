@@ -72,7 +72,7 @@ export class LiveClient {
   }
 
   async register() {
-    const result = await this.api('POST', '/api/auth/register', { username: this.username, authKey: this.authKey })
+    const result = await this.api('POST', '/api/auth/register', { username: this.username, email: `${this.username}@example.test`, authKey: this.authKey })
     this.totpSecret = result.secret
     return this.verify(result.challenge)
   }

@@ -17,6 +17,7 @@ const CAN = [
   ['Who is in each conversation', 'Needed to route ciphertext and enforce access. Member lists are signed by the owner so the server cannot quietly change them.'],
   ['Which device sent to which device, and when', 'Visible while a message waits for delivery. The row is deleted when the recipient device confirms receipt.'],
   ['Approximate size', 'The 256-byte size class of messages and the size of encrypted attachments.'],
+  ['Your email address', 'Collected at sign-up for the workspace’s records. Stored as you typed it, not verified, and shown only to administrators and auditors.'],
   ['Usernames, roles and public keys', 'Public keys are meant to be public. Compare security codes to be sure they are the right ones.'],
   ['Security events', 'Event type, time and device id, kept 30 days. No content, no IP addresses.'],
   ['Your network, coarsely and briefly', 'A keyed hash of your network prefix and browser string is kept per session to spot hijacking. The raw values are not stored.'],
