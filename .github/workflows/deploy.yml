@@ -1,0 +1,57 @@
+name: Deploy
+# Runs after CI succeeds on main, or by hand. The server builds the exact commit CI tested.
+# Opt in with repository variable DEPLOY_ENABLED=true. Required secrets and variables are
+# listed in docs/DEPLOYMENT.md.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to server
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: >-
+      vars.DEPLOY_ENABLED == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - name: Configure SSH with a pinned host key
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Pinned, not fetched with ssh-keyscan: a hijacked DNS record or IP must not be trusted.
+          printf '%s\n' "$DEPLOY_HOST_KEY" > ~/.ssh/known_hosts
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST_KEY: ${{ secrets.DEPLOY_HOST_KEY }}
+
+      - name: Build and restart on the server
+        # The key is restricted on the server to the deploy script; the only input is the commit hash.
+        run: ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes -o BatchMode=yes "deploy@$DEPLOY_HOST" "$SHA"
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+
+      - name: Check the public site
+        # Deliberately not the smoke test: that registers accounts, which does not belong on production.
+        run: |
+          test "$(curl -s -o /dev/null -w '%{http_code}' "$APP_URL/")" = 200
+          test "$(curl -s -o /dev/null -w '%{http_code}' "$APP_URL/api/me")" = 401
+          curl -sI "$APP_URL/" | grep -qi '^content-security-policy:'
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+
+      - name: Remove key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

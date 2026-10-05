@@ -70,7 +70,46 @@ Registers two throwaway accounts and exchanges encrypted messages and a file ove
 | `postgres` | Re-runs the security suite against Neon. Opt in with repository variable `RUN_NEON_TESTS=true` and secret `TEST_DATABASE_URL` |
 | `audit` | `npm audit` at moderate severity |
 
-Deployment itself is not automated yet; add a job for your chosen host once it is decided.
+## Continuous deployment (GitHub Actions → your server)
+
+`.github/workflows/deploy.yml` runs after `CI` succeeds on `main` (or by hand from the Actions tab). It opens one SSH connection and passes one value: the commit hash that CI tested. Everything else happens in `deploy/cipherroom-deploy.sh` on the server, which fetches, refuses any commit not on `origin/main`, builds, restarts the service, checks health, and rolls back to the previous commit if the health check fails.
+
+The design keeps the GitHub side weak on purpose:
+
+- The Actions key logs in as a `deploy` user whose key is locked (`authorized_keys` forced command) to the deploy script. It cannot open a shell, forward ports or run anything else.
+- `deploy` may run exactly one command as root through `sudo`.
+- The script is a root-owned copy in `/usr/local/bin`, not the file in the repository, so a pushed commit cannot change what runs as root. Re-copy it deliberately when it changes.
+- The server's SSH host key is pinned in a secret rather than trusted on first connect.
+- No application secret (`DATABASE_URL`, `SERVER_SECRET`) is stored in GitHub; they stay in `.env` on the server.
+
+A push to `main` can still run code on the server as the unprivileged `cipherroom` user, because building runs the repository's own build. Protect `main` accordingly.
+
+### One-time server setup
+
+Assumes the server is already set up as in sections 1–4 with the app in `/opt/cipherroom/app`, running as user `cipherroom` under the `cipherroom` systemd service.
+
+```bash
+install -o root -g root -m 755 /opt/cipherroom/app/deploy/cipherroom-deploy.sh /usr/local/bin/cipherroom-deploy
+useradd --create-home --shell /bin/bash deploy
+echo 'deploy ALL=(root) NOPASSWD: /usr/local/bin/cipherroom-deploy' > /etc/sudoers.d/cipherroom-deploy
+chmod 440 /etc/sudoers.d/cipherroom-deploy && visudo -cf /etc/sudoers.d/cipherroom-deploy
+install -d -o deploy -g deploy -m 700 /home/deploy/.ssh
+ssh-keygen -t ed25519 -N '' -C github-actions-deploy -f /root/gha_deploy_key
+echo "restrict,command=\"sudo /usr/local/bin/cipherroom-deploy \\\"\$SSH_ORIGINAL_COMMAND\\\"\" $(cat /root/gha_deploy_key.pub)" > /home/deploy/.ssh/authorized_keys
+chown deploy:deploy /home/deploy/.ssh/authorized_keys && chmod 600 /home/deploy/.ssh/authorized_keys
+```
+
+### GitHub settings (Settings → Secrets and variables → Actions)
+
+| Kind | Name | Value |
+|---|---|---|
+| Secret | `DEPLOY_HOST` | Server IP or hostname |
+| Secret | `DEPLOY_SSH_KEY` | Contents of `/root/gha_deploy_key` (then delete that file from the server) |
+| Secret | `DEPLOY_HOST_KEY` | One `known_hosts` line: `<DEPLOY_HOST value> ` followed by the contents of `/etc/ssh/ssh_host_ed25519_key.pub` |
+| Variable | `APP_URL` | Public URL, e.g. `https://chat.example.com` (no trailing slash) |
+| Variable | `DEPLOY_ENABLED` | `true` |
+
+The deploy job does not run the smoke test against production, because that registers accounts. It checks that the site returns 200, the API answers, and the Content-Security-Policy header is present.
 
 ## Operations
 
