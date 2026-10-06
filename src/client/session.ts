@@ -9,6 +9,8 @@ import type { Me, Transport, VaultState } from './messenger'
 
 export type AppState = {
   phase: 'locked' | 'mfa' | 'ready'
+  /** True until the first check for an unlock kept from before a page reload has finished. */
+  booting: boolean
   busy: boolean
   username: string
   me: Me | null
@@ -25,7 +27,7 @@ export type AppState = {
   lastSend: { encryptMs: number; totalMs: number; recipients: number } | null
 }
 
-let state: AppState = { phase: 'locked', busy: false, username: '', me: null, enrol: null, newDevice: true, connection: 'offline', version: 0, remote: 0, toast: null, stepUp: null, lastSend: null }
+let state: AppState = { phase: 'locked', booting: true, busy: false, username: '', me: null, enrol: null, newDevice: true, connection: 'offline', version: 0, remote: 0, toast: null, stepUp: null, lastSend: null }
 const listeners = new Set<() => void>()
 function set(patch: Partial<AppState>) {
   state = { ...state, ...patch }
@@ -78,11 +80,87 @@ async function idbPut(key: string, value: unknown) {
     tx.onerror = () => reject(tx.error)
   })
 }
+async function idbDelete(key: string) {
+  const db = await idb()
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction('vaults', 'readwrite')
+    tx.objectStore('vaults').delete(key)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+}
 const label = (username: string) => `cr/vault/v2|${username}`
 /** The vault (keys, ratchet sessions, pins, history) is only ever written to disk encrypted. */
 async function persist(next: VaultState) {
   if (!vaultKey) return
   await idbPut(state.username, P.seal(vaultKey, label(state.username), new TextEncoder().encode(JSON.stringify(next))))
+}
+
+// ---------- unlock kept across a reload ----------
+
+// Usernames start with a letter and contain no slash, so this never collides with a vault entry.
+const RESUME = 'cr/resume'
+
+/**
+ * Lets a reload of this tab reopen the vault without the password. The vault key is wrapped under a
+ * non-extractable WebCrypto key held in IndexedDB; the wrapped copy lives in sessionStorage, so it
+ * goes away with the tab. Neither half is of use without the other, and both are dropped on lock.
+ */
+async function rememberUnlock() {
+  if (!vaultKey) return
+  try {
+    let key: CryptoKey | undefined = await idbGet(RESUME)
+    if (!key) {
+      key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
+      await idbPut(RESUME, key)
+    }
+    const iv = crypto.getRandomValues(new Uint8Array(12))
+    const additionalData = new TextEncoder().encode(label(state.username))
+    const wrapped = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData }, key, vaultKey as BufferSource))
+    sessionStorage.setItem(RESUME, JSON.stringify({ username: state.username, iv: P.b64(iv), wrapped: P.b64(wrapped) }))
+  } catch {
+    // Storage can be unavailable (private mode, quota). The cost is only a password prompt after reload.
+  }
+}
+
+function forgetUnlock() {
+  try {
+    sessionStorage.removeItem(RESUME)
+  } catch {}
+  void idbDelete(RESUME).catch(() => {})
+}
+
+let resumed = false
+/** Runs once on page load: reopens the vault if this tab was unlocked before the reload and the server session still stands. */
+export async function resume() {
+  if (resumed) return
+  resumed = true
+  try {
+    const saved = sessionStorage.getItem(RESUME)
+    if (!saved) return
+    const { username, iv, wrapped } = JSON.parse(saved)
+    const response = await fetch('/api/me', { credentials: 'same-origin' })
+    if (!response.ok) {
+      if (response.status === 401) forgetUnlock()
+      return
+    }
+    const me: Me = await response.json()
+    const [key, sealed] = await Promise.all([idbGet(RESUME), idbGet(username)])
+    if (!key || !sealed) return forgetUnlock()
+    const additionalData = new TextEncoder().encode(label(username))
+    const unwrapped = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: P.unb64(iv) as BufferSource, additionalData }, key, P.unb64(wrapped) as BufferSource))
+    const opened: VaultState = JSON.parse(new TextDecoder().decode(P.unseal(unwrapped, label(username), sealed)))
+    if (me.user.username !== username || me.device.id !== opened.keys.deviceId) return forgetUnlock()
+    vault = opened
+    vaultKey = unwrapped
+    set({ username, newDevice: false })
+    await enter(me)
+  } catch (error) {
+    if (state.phase === 'ready') report(error)
+    else forgetUnlock()
+  } finally {
+    set({ booting: false })
+  }
 }
 
 // ---------- transport ----------
@@ -240,6 +318,7 @@ async function enter(me: Me) {
   vault!.enrolled = true
   set({ phase: 'ready', me, enrol: null })
   await persist(vault!)
+  await rememberUnlock()
   await messenger.start(me)
   connect()
   timers = [
@@ -263,6 +342,7 @@ export function lock(reason?: string) {
   for (const timer of timers) clearInterval(timer)
   timers = []
   clearTimeout(reconnect)
+  forgetUnlock()
   const ws = socket
   socket = null
   ws?.close()

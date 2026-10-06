@@ -1,7 +1,7 @@
 import { Link } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { cancelStepUp, dismissToast, getMessenger, guard, logout, submitStepUp, useApp } from '~/client/session'
+import { cancelStepUp, dismissToast, getMessenger, guard, logout, resume, submitStepUp, useApp } from '~/client/session'
 import { deviceFingerprint } from '~/shared/protocol'
 import { AuthScreen, Logo } from './AuthScreen'
 import { Badge, Button, Field, Modal } from './ui'
@@ -94,6 +94,9 @@ function PendingDevice() {
 
 export function Shell({ children }: { children: ReactNode }) {
   const app = useApp()
+  useEffect(() => void resume(), [])
+  // Holds the sign-in form back until we know whether a reload can reopen the vault by itself.
+  if (app.booting) return <main className="h-full" aria-busy="true" />
   if (app.phase !== 'ready' || !app.me)
     return (
       <>

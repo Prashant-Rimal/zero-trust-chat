@@ -22,7 +22,7 @@ function Root() {
         <HeadContent />
       </head>
       <body className="h-full">
-        {/* Everything behind the sign-in screen depends on keys that exist only in this browser's memory. */}
+        {/* Everything behind the sign-in screen depends on keys that are only ever usable inside this browser. */}
         <Shell>
           <Outlet />
         </Shell>

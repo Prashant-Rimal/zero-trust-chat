@@ -115,3 +115,4 @@ Covered in [PRIVACY.md](PRIVACY.md) and the *metadata leakage* tests, which pin 
 6. **`SERVER_SECRET` + database together** reveal TOTP seeds (not messages, not vault keys).
 7. **In-memory rate limits** reset on restart and are per instance.
 8. **Password quality** is the only protection for a stolen vault file.
+9. **Unlock kept across reloads.** While a tab is signed in, the browser profile holds a wrapped vault key and its wrapping key. A copy of the whole profile taken in that window (A7) opens the vault without the password. Signing out or closing the tab ends the window.
