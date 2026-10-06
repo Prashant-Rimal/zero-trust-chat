@@ -48,7 +48,7 @@ route('POST', '/api/devices/:id/approve', { access: 'trusted', stepUp: true, bod
 3. Server returns a single-use challenge. Browser sends the TOTP code, the device's public keys, and an Ed25519 signature over the challenge.
 4. Server sets an HttpOnly, SameSite=Strict session cookie (only its SHA-256 is stored) and returns a CSRF token.
 
-After a page reload the vault key is gone from memory. If the server session is still valid for that device, entering the password alone unlocks the vault; otherwise the full flow runs.
+A page reload clears the vault key from memory. To survive it, the key is kept wrapped under a non-extractable WebCrypto key: the wrapping key sits in IndexedDB, the wrapped copy in the tab's `sessionStorage`. On load, if the server session is still valid for that device, the vault reopens without a prompt. Signing out, a revoked or expired session, or closing the tab discards the wrapped copy; then, if the server session is still valid, the password alone unlocks the vault, otherwise the full flow runs.
 
 ## Realtime
 
