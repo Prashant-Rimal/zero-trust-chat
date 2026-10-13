@@ -372,6 +372,8 @@ export function createApp(options: AppOptions) {
 
   function route<TBody = any>(method: string, pattern: string, policy: Policy, run: (ctx: Ctx<TBody>) => Promise<unknown>) {
     const keys: Array<string> = []
+    // `pattern` is a literal from the route table below, never request input, so it cannot carry a ReDoS payload.
+    // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
     const regex = new RegExp(`^${pattern.replace(/:(\w+)/g, (_, name) => (keys.push(name), '([\\w-]{1,64})'))}$`)
     routes.push({ method, pattern, regex, keys, policy, run })
   }

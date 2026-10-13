@@ -77,7 +77,8 @@ export function sealAtRest(value: string, key: Buffer) {
 }
 export function unsealAtRest(value: string, key: Buffer) {
   const bytes = Buffer.from(value, 'base64')
-  const cipher = createDecipheriv('aes-256-gcm', key, bytes.subarray(0, 12))
+  // A fixed tag length stops a truncated tag from being accepted.
+  const cipher = createDecipheriv('aes-256-gcm', key, bytes.subarray(0, 12), { authTagLength: 16 })
   cipher.setAuthTag(bytes.subarray(12, 28))
   return Buffer.concat([cipher.update(bytes.subarray(28)), cipher.final()]).toString('utf8')
 }
