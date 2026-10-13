@@ -101,6 +101,70 @@ jobs:
         env:
           TEST_DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
 
+  sast:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+      # --error makes any finding fail the job; the SARIF report is kept either way.
+      - run: semgrep scan --config p/default --error --sarif --output semgrep.sarif
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: semgrep-report
+          path: semgrep.sarif
+
+  secrets:
+    name: Secrets scan (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: a secret that was committed and later removed is still a leak.
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  dast:
+    name: DAST (OWASP ZAP baseline)
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: build
+          path: dist/
+      - name: Start server (local PGlite database, throwaway secret)
+        run: |
+          export SERVER_SECRET="$(openssl rand -base64 32)"
+          PORT=3000 node serve.mjs > server.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            curl --fail --silent --output /dev/null http://localhost:3000/ && exit 0
+            sleep 1
+          done
+          cat server.log
+          exit 1
+      - name: Passive scan of the running production build
+        # -I: warnings are reported but do not fail the job; a rule set to FAIL still does.
+        run: |
+          mkdir zap && chmod 777 zap
+          docker run --rm --network host -v "$PWD/zap:/zap/wrk:rw" ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py -t http://localhost:3000 -I -r zap-report.html -J zap-report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zap-report
+          path: zap/
+
   audit:
     name: Dependency audit
     runs-on: ubuntu-latest

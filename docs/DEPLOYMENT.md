@@ -68,6 +68,9 @@ Registers two throwaway accounts and exchanges encrypted messages and a file ove
 | `smoke` | Starts the built server on the runner and runs the two-client smoke test over real HTTP/WebSocket; fails if the server log contains ids in route fields |
 | `benchmark` | Runs the overhead benchmark and uploads `benchmark.json` |
 | `postgres` | Re-runs the security suite against Neon. Opt in with repository variable `RUN_NEON_TESTS=true` and secret `TEST_DATABASE_URL` |
+| `sast` | Semgrep static analysis (`p/default` rules); any finding fails the job; SARIF report uploaded |
+| `secrets` | Gitleaks over the full git history |
+| `dast` | Starts the built server and runs the OWASP ZAP baseline (passive) scan against it; warnings are reported, not failing; HTML and JSON reports uploaded |
 | `audit` | `npm audit` at moderate severity |
 
 ## Continuous deployment (GitHub Actions → your server)
