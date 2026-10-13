@@ -15,6 +15,8 @@ function secure(response: Response, nonce: string) {
   const headers = new Headers(response.headers)
   headers.set('X-Content-Type-Options', 'nosniff')
   headers.set('Referrer-Policy', 'no-referrer')
+  // The value is a constant, not request input.
+  // nosemgrep: javascript.express.security.x-frame-options-misconfiguration.x-frame-options-misconfiguration
   headers.set('X-Frame-Options', 'DENY')
   headers.set('Cross-Origin-Opener-Policy', 'same-origin')
   headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()')
